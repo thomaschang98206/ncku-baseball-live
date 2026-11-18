@@ -207,6 +207,22 @@ var S={
 };
 if(S.cfg.dm===false) S.dmOn=false;
 if(!S.cfg.api) S.cfg.api=DEFAULT_API;
+/* ===== 官方設定（config.json，和網頁放在同一個 repo）=====
+   每場比賽前只要改 config.json 的 yt，所有人打開連結就會自動播放這場直播；
+   開著網頁的人約 1 分鐘內也會自動換上新的直播。
+   優先順序：網址參數 ?v=影片ID ＞ 自己在「測試用」欄位填的 ＞ config.json */
+S.site={};
+var QS=new URLSearchParams(location.search);
+function curYt(){ return QS.get('v')||S.cfg.ytTest||S.site.yt||''; }
+function wantSrc(){ if(QS.get('demo')==='1') return 'demo'; return S.cfg.srcTest||S.site.source||'live'; }
+function loadSite(first){
+  return fetch('config.json?x='+Date.now(),{cache:'no-store'}).then(function(r){ return r.ok?r.json():{}; }).catch(function(){ return {}; }).then(function(o){
+    var oldYt=curYt(), oldSrc=wantSrc(); S.site=o||{}; if(S.site.api) S.cfg.api=S.site.api;
+    if(first) return;
+    if(curYt()!==oldYt){ var app=document.getElementById('app'); app.dataset.built=''; S.yt=null; render(); }
+    if(wantSrc()!==oldSrc){ if(wantSrc()==='live') startLive(); else startDemo(); }
+  });
+}
 
 /* ================= 資料：和「及時資料處理」同一套正規化 ================= */
 function teamPitcher(t){ if(!t) return null; return (t.lineup||[]).find(function(p){return p.pos==='P';}) || (t.pitcherId?(t.bench||[]).find(function(p){return p.id===t.pitcherId;}):null) || null; }
@@ -426,7 +442,7 @@ function ytChannel(s){ s=String(s||'').trim(); var m=s.match(/(UC[A-Za-z0-9_-]{2
 function loadYTApi(cb){ if(window.YT&&window.YT.Player){ cb(); return; } window.onYouTubeIframeAPIReady=cb; if(!document.getElementById('yt-api')){ var s=document.createElement('script'); s.id='yt-api'; s.src='https://www.youtube.com/iframe_api'; document.head.appendChild(s); } }
 function mountYT(){
   var host=document.getElementById('yt'); if(!host) return;
-  var id=ytId(S.cfg.yt), ch=ytChannel(S.cfg.yt);
+  var id=ytId(curYt()), ch=ytChannel(curYt());
   if(!id && !ch){ S.yt=null; return; }
   var vars={autoplay:1, mute:1, playsinline:1, fs:0, rel:0, modestbranding:1, controls:1};
   loadYTApi(function(){
@@ -469,11 +485,11 @@ function render(){
   renderSide(); renderSheet();
 }
 function shell(){
-  var hasVid=!!(ytId(S.cfg.yt)||ytChannel(S.cfg.yt));
+  var hasVid=!!(ytId(curYt())||ytChannel(curYt()));
   return '<div class="sb" id="sb"></div><div class="demobar" id="demobar" style="display:none"></div>'+
     '<div class="main" data-tab="'+S.tab+'">'+
       '<div class="videoWrap" id="vwrap">'+
-        (hasVid?'<div id="yt"></div>':'<div class="vph"><b>直播播放區</b><span>還沒設定直播網址</span><button class="btn pri" data-act="settings">⚙ 設定直播</button><span class="muted">彈幕、火箭在這裡一樣看得到</span></div>')+
+        (hasVid?'<div id="yt"></div>':'<div class="vph"><b>直播播放區</b><span>直播還沒開始</span><span class="muted">開播後這裡會自動播放；彈幕、火箭現在就能用</span></div>')+
         '<div class="dm" id="dm"></div>'+
         (hasVid?'<button class="unmute" id="unmute" data-act="mute">🔊 點我開聲音</button>':'')+
         '<div class="vctl"><button data-act="dm">'+(S.dmOn?'彈幕 開':'彈幕 關')+'</button><button data-act="full">⛶ 全螢幕</button></div>'+
@@ -595,10 +611,11 @@ function renderSheet(){
   } else if(sh.type==='settings'){
     var c=S.cfg;
     h+='<h3>設定</h3><div class="sub">雛形 v'+VERSION+'</div>'+
-      '<div class="fieldrow">直播（YouTube 網址、影片 ID，或頻道 ID UC…）<input id="cf-yt" value="'+esc(c.yt||'')+'" placeholder="https://www.youtube.com/live/xxxxxxxxxxx"></div>'+
       '<div class="fieldrow">暱稱<input id="cf-nick" maxlength="12" value="'+esc(c.nick||'')+'" placeholder="例如：成大校友"></div>'+
-      '<div class="fieldrow">比賽資料來源<select id="cf-src"><option value="demo"'+(S.mode!=='live'?' selected':'')+'>DEMO（義守 10 球劇本）</option><option value="live"'+(S.mode==='live'?' selected':'')+'>即時（雲端最新一場）</option></select></div>'+
-      '<div class="fieldrow">雲端網址（Apps Script）<input id="cf-api" value="'+esc(c.api||'')+'"></div>'+
+      '<details style="margin-bottom:10px"><summary class="muted">進階（測試用）</summary><div style="margin-top:8px">'+
+      '<div class="fieldrow">測試用直播網址（留空＝使用官方設定'+(S.site.yt?'':'，目前官方尚未設定')+'）<input id="cf-yt" value="'+esc(c.ytTest||'')+'" placeholder="https://www.youtube.com/live/xxxxxxxxxxx"></div>'+
+      '<div class="fieldrow">比賽資料來源<select id="cf-src"><option value=""'+(!c.srcTest?' selected':'')+'>使用官方設定</option><option value="demo"'+(c.srcTest==='demo'?' selected':'')+'>DEMO（義守 10 球劇本）</option><option value="live"'+(c.srcTest==='live'?' selected':'')+'>即時（雲端最新一場）</option></select></div>'+
+      '<div class="fieldrow">雲端網址（Apps Script）<input id="cf-api" value="'+esc(c.api||'')+'"></div></div></details>'+
       '<p class="muted">雛形的多人同步只在「同一台電腦的多個分頁」之間有效。開兩個分頁、取不同暱稱，就能模擬兩位觀眾。</p>'+
       '<div class="row" style="justify-content:flex-end"><button class="btn" data-act="close">取消</button><button class="btn pri" data-act="saveCfg">儲存</button></div>';
   } else if(sh.type==='nick'){
@@ -634,10 +651,10 @@ document.addEventListener('click',function(ev){
   else if(a==='stats'){ S.sheet={type:'stats'}; renderSheet(); }
   else if(a==='saveNick'){ var v=(document.getElementById('nick-in').value||'').trim().slice(0,12); if(!v) return; S.cfg.nick=v; saveJSON(CFG_KEY,S.cfg); S.sheet=null; renderSheet(); var ci=document.getElementById('chat-in'); if(ci) ci.placeholder='以「'+v+'」留言…'; var cb=nickCb; nickCb=null; if(cb) cb(); }
   else if(a==='saveCfg'){
-    var oldYt=S.cfg.yt; S.cfg.yt=document.getElementById('cf-yt').value.trim(); var nk=document.getElementById('cf-nick').value.trim().slice(0,12); if(nk) S.cfg.nick=nk;
-    S.cfg.api=document.getElementById('cf-api').value.trim()||DEFAULT_API; var src=document.getElementById('cf-src').value; S.cfg.src=src; saveJSON(CFG_KEY,S.cfg); S.sheet=null;
-    if(oldYt!==S.cfg.yt){ var app=document.getElementById('app'); app.dataset.built=''; S.yt=null; }
-    if(src==='live') startLive(); else startDemo();
+    var oldYt=curYt(), oldSrc=wantSrc(); S.cfg.ytTest=document.getElementById('cf-yt').value.trim(); var nk=document.getElementById('cf-nick').value.trim().slice(0,12); if(nk) S.cfg.nick=nk;
+    S.cfg.api=document.getElementById('cf-api').value.trim()||S.site.api||DEFAULT_API; S.cfg.srcTest=document.getElementById('cf-src').value; saveJSON(CFG_KEY,S.cfg); S.sheet=null;
+    if(oldYt!==curYt()){ var app=document.getElementById('app'); app.dataset.built=''; S.yt=null; }
+    if(wantSrc()!==oldSrc||S.mode==='none'){ if(wantSrc()==='live') startLive(); else startDemo(); }
     render();
   }
   else if(a==='mute') toggleMute();
@@ -656,7 +673,7 @@ window.addEventListener('storage',function(e){ /* 備援：BroadcastChannel 不�
   if(bc||!S.cur||e.key!==logKey()) return; (loadJSON(logKey(),[])||[]).forEach(function(m){ receive(m,false); }); });
 
 /* ================= 啟動 ================= */
-if(S.cfg.src==='live') startLive(); else startDemo();
+loadSite(true).then(function(){ if(wantSrc()==='live') startLive(); else startDemo(); setInterval(function(){ if(!document.hidden) loadSite(false); }, 60000); });
 })();
 </script>
 </body>
